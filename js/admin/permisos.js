@@ -9,7 +9,16 @@ ocultarPorPermiso('#actividad-admin, a[href="#actividad-admin"], #notificaciones
 ocultarPorPermiso('#tutorial-admin, a[href="#tutorial-admin"]', permisos.tiene("tutorial"));
 ocultarPorPermiso('#alta-curso, [data-abrir-form="alta-curso"], .cursos-admin-guia', permisos.tiene("crearCursos"));
 ocultarPorPermiso('.curso-editor-asignacion', false);
-if (sesion.rol() === "instructor") ocultarPorPermiso('#resumen-admin, a[href="#resumen-admin"]', false);
+if (sesion.rol() === "instructor") {
+  ocultarPorPermiso('#resumen-admin, a[href="#resumen-admin"]', false);
+  document.querySelectorAll('[data-asistencia-admin]').forEach(enlace => enlace.remove());
+}
+if (["admin", "superadmin"].includes(sesion.rol())) {
+  document.querySelectorAll('[data-asistencia-admin]').forEach(enlace => {
+    enlace.hidden = false;
+    enlace.style.removeProperty("display");
+  });
+}
 const explicacionRol = document.createElement("p");
 explicacionRol.className = "muted";
 explicacionRol.textContent = {
