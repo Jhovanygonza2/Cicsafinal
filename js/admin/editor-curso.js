@@ -438,11 +438,12 @@ function agregarSubtemaEditor(contenedor) {
         <button type="button" class="editor-subtema-tipo-boton" data-tipo-subtema="texto">📝 Texto</button>
         <button type="button" class="editor-subtema-tipo-boton" data-tipo-subtema="video">🎬 Video</button>
         <button type="button" class="editor-subtema-tipo-boton" data-tipo-subtema="imagen">🖼️ Imagen</button>
+        <button type="button" class="editor-subtema-tipo-boton" data-tipo-subtema="documento">Documento PDF</button>
       </div>
       <input type="hidden" class="editor-subtema-tipo" value="texto" />
       <textarea class="editor-subtema-informacion" placeholder="Texto o descripción del subtema" aria-label="Información del subtema" rows="3"></textarea>
       <label class="editor-subtema-recurso">
-        <span>Archivo del subtema (imagen o video)</span>
+        <span>Archivo del subtema (imagen, video o PDF)</span>
         <input type="file" class="editor-subtema-archivo" accept="image/*,video/*" aria-label="Archivo del subtema" />
         <div class="editor-subtema-preview">Sin archivo seleccionado</div>
       </label>
@@ -471,7 +472,7 @@ function aplicarTipoSubtema(fila, tipo) {
     boton.classList.toggle("activo", activo);
     boton.setAttribute("aria-pressed", String(activo));
   });
-  archivo.accept = tipo === "video" ? "video/*" : tipo === "imagen" ? "image/*" : "image/*,video/*";
+  archivo.accept = tipo === "documento" ? "application/pdf,.pdf" : tipo === "video" ? "video/*" : tipo === "imagen" ? "image/*" : "image/*,video/*";
   recurso.hidden = tipo === "texto";
   actualizarVistaSubtema(fila);
 }
@@ -485,7 +486,8 @@ function actualizarVistaSubtema(fila) {
   const urlVista = archivoSeleccionado ? URL.createObjectURL(archivoSeleccionado) : fila.dataset.mediaUrl || "";
   preview.replaceChildren();
   if (tipo !== "texto" && urlVista) {
-    const vista = document.createElement(tipo === "video" ? "video" : "img");
+    const vista = document.createElement(tipo === "documento" ? "a" : tipo === "video" ? "video" : "img");
+    if (tipo === "documento") {vista.href=urlVista; vista.textContent="Ver documento PDF"; vista.target="_blank"; vista.rel="noopener";}
     vista.src = urlVista;
     if (tipo === "video") {
       vista.muted = true;
@@ -539,6 +541,7 @@ async function construirModulosDesdeEditor() {
       for (const subtema of [...tema.querySelectorAll(":scope > .editor-subtemas > .editor-subtema")]) {
         const tipo = subtema.querySelector(".editor-subtema-tipo").value;
         const archivo = subtema.querySelector(".editor-subtema-archivo").files?.[0];
+        if (tipo === "documento" && archivo && archivo.type !== "application/pdf" && !/\.pdf$/i.test(archivo.name)) throw new Error("Selecciona un documento PDF.");
         const url = tipo === "texto"
           ? ""
           : archivo ? await leerArchivoComoDataUrl(archivo, tipo === "video" ? 25 : 5) : subtema.dataset.mediaUrl || "";

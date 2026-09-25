@@ -30,6 +30,15 @@ let solicitudContenido = 0;
 let guardandoLeccion = false;
 let cargandoLeccion = false;
 let leccionDisponible = false;
+let controlConsumo = null;
+function detenerConsumo() { controlConsumo?.detener(); controlConsumo=null; }
+function puedeCompletarActual() { return !!progresoCurso?.completadas.includes(leccionActualId) || !!controlConsumo?.listo(); }
+function puedeAbrirLeccion(id) {
+  const todas=obtenerTodasLecciones();
+  return progresoCurso?.completadas.includes(id) || todas.find(l=>!progresoCurso?.completadas.includes(l.id))?.id===id;
+}
+window.addEventListener("pagehide", () => controlConsumo?.detener());
+window.addEventListener("pageshow", event => { if (event.persisted && typeof leccionActualId === "number") mostrarLeccion(leccionActualId); });
 
 
 // Cierre global: apertura + horas; nunca se reinicia al entrar o recargar.
@@ -39,6 +48,7 @@ function verificarCierreCurso() {
   if (!curso || estadoTemporalCurso(curso) !== "cerrado") return false;
   if (!cursoCerrado) {
     cursoCerrado = true;
+    detenerConsumo();
     solicitudContenido++;
     leccionDisponible = false;
     contenidoTema.innerHTML = '<div class="lector-aviso-examen"><h1>Curso cerrado</h1><p>Terminó el tiempo disponible del curso. Tu avance guardado se conserva.</p><a class="btn btn-primario" href="dashboard.html">Volver a mis cursos</a></div>';
@@ -256,13 +266,13 @@ function actualizarEstadoNavegacion() {
   const terminaModulos = !!progresoCurso?.evaluacionInicialAprobada
     && (cursoListoParaExamen() || (pendientes.length === 1 && pendientes[0].id === leccionActualId));
   btnSiguiente.textContent = terminaModulos ? "Ir al examen final" : indice === todas.length - 1 ? "Continuar con pendientes" : "Siguiente";
-  btnSiguiente.disabled = cargandoLeccion || guardandoLeccion || evaluando || indice < 0;
+  btnSiguiente.disabled = cargandoLeccion || guardandoLeccion || evaluando || indice < 0 || !leccionDisponible || !puedeCompletarActual();
   btnSiguiente.hidden = evaluando;
   btnSiguiente.setAttribute("aria-label", btnSiguiente.textContent);
   const completa = progresoCurso?.completadas.includes(leccionActualId);
   document.getElementById("lector-estado-leccion").textContent = evaluando
     ? (leccionActualId === "examen" ? "Examen final" : "Evaluación del curso")
-    : completa ? "Lección completada" : "Pulsa Siguiente al terminar de estudiar la lección";
+    : completa ? "Lección completada" : controlConsumo?.mensaje() || "Espera a que cargue el contenido.";
 }
 
 function cursoListoParaExamen() {
@@ -275,7 +285,7 @@ function siguienteLeccion() {
   if (cargandoLeccion || guardandoLeccion) return;
   const todas = obtenerTodasLecciones();
   const indice = todas.findIndex(l => l.id === leccionActualId);
-  if (indice < 0) return;
+  if (indice < 0 || !progresoCurso?.completadas.includes(leccionActualId)) return;
   if (!progresoCurso?.evaluacionInicialAprobada) return mostrarEvaluacion("evaluacion");
   if (cursoListoParaExamen()) return mostrarEvaluacion("examen");
   if (indice < todas.length - 1) return mostrarLeccion(todas[indice + 1].id);
@@ -366,6 +376,9 @@ function pintarEsquema() {
   });
   filtrarEsquema();
   estructuraModulos.querySelectorAll("[data-leccion]").forEach((item) => {
+    const bloqueada = !puedeAbrirLeccion(Number(item.dataset.leccion));
+    item.setAttribute("aria-disabled", String(bloqueada));
+    if (bloqueada) { item.title="Completa primero la unidad pendiente"; item.style.opacity="0.55"; }
     item.addEventListener("click", () => mostrarLeccion(Number(item.dataset.leccion)));
   });
   estructuraModulos.querySelectorAll("[data-evaluacion-tipo]").forEach((item) => {
@@ -398,6 +411,12 @@ async function mostrarLeccion(idLeccion) {
     return;
   }
 
+  if (!puedeAbrirLeccion(idLeccion)) {
+    document.getElementById("lector-aviso-guardado").textContent = "Completa primero la unidad pendiente y pulsa Siguiente para guardar tu avance.";
+    return;
+  }
+  detenerConsumo();
+  document.getElementById("lector-aviso-guardado").textContent = "";
   leccionActualId = idLeccion;
   const solicitud = ++solicitudContenido;
   cargandoLeccion = true;
@@ -426,10 +445,7 @@ async function mostrarLeccion(idLeccion) {
   // todas las lecciones. Se aceptan las estructuras antiguas y nuevas.
   const recursoLeccion = leccion.url || leccion.video || leccion.mediaUrl || contenido?.url || contenido?.video || "";
   const urlMedia = obtenerUrlMediaSegura(recursoLeccion);
-  const tipoDetectado = String(leccion.tipo || contenido?.tipo || "").toLowerCase();
-  const tipoMedia = tipoDetectado === "video" || /^(data:video\/|blob:|https?:\/\/.*\.(mp4|webm|ogg|mov)(\?.*)?$)/i.test(recursoLeccion)
-    ? "video"
-    : tipoDetectado;
+  const tipoMedia = reglaConsumoLeccion(leccion, contenido || {}).tipo;
   const temaActual = curso?.modulos?.flatMap((m) => m.temas || []).find((t) => (t.subtemas || []).some((s) => s.id === idLeccion));
   const moduloActual = curso?.modulos?.find((m) => (m.temas || []).some((t) => (t.subtemas || []).some((s) => s.id === idLeccion))) || null;
   // En la vista de una lección solo se muestra el recurso propio de esa lección.
@@ -438,6 +454,8 @@ async function mostrarLeccion(idLeccion) {
   const marcoMedia = urlMedia
     ? tipoMedia === "video"
       ? `<video class="lector-media-recurso" src="${urlMedia}" controls preload="metadata" playsinline></video>`
+      : tipoMedia === "documento"
+        ? `<iframe class="lector-documento" src="${urlMedia}" title="Material de consulta" style="width:100%;min-height:420px"></iframe><button class="btn btn-secundario" type="button" data-descargar-material>Descargar material</button><p data-aviso-descarga role="status"></p>`
       : `<img class="lector-media-recurso" src="${urlMedia}" alt="Imagen de la lección" loading="lazy" />`
     : "";
 
@@ -461,6 +479,10 @@ async function mostrarLeccion(idLeccion) {
     </div>
   `;
   leccionDisponible = Boolean(informacion || urlMedia);
+  controlConsumo = crearControlConsumo({leccion, contenido: contenido || {}, raiz: contenidoTema,
+    clave: claveConsumoLeccion(sesion.usuario().id, curso, leccion, contenido || {}),
+    vigente: () => leccionActualId === idLeccion && !cursoCerrado && !cargandoLeccion,
+    actualizar: actualizarEstadoNavegacion});
   prepararVista();
   if (leccionTopbar) leccionTopbar.textContent = leccion.nombre;
 
@@ -473,7 +495,7 @@ async function mostrarLeccion(idLeccion) {
 
 async function avanzar() {
   if (verificarCierreCurso()) return;
-  if (guardandoLeccion || cargandoLeccion || !leccionDisponible) return;
+  if (guardandoLeccion || cargandoLeccion || !leccionDisponible || !puedeCompletarActual()) return;
   const id = leccionActualId;
   if (!obtenerTodasLecciones().some(l => l.id === id)) return;
   guardandoLeccion = true;
@@ -482,14 +504,14 @@ async function avanzar() {
   aviso.textContent = "";
   try {
     if (!progresoCurso.completadas.includes(id)) {
-      await progreso.completarLeccion(id);
+      await progreso.completarLeccion(id, controlConsumo?.evidencia());
       progresoCurso.completadas.push(id);
     }
     normalizarProgreso();
     guardandoLeccion = false;
     siguienteLeccion();
   } catch (error) {
-    aviso.textContent = "No se guardó tu avance. Inténtalo de nuevo.";
+    aviso.textContent = error.message || "No se guardó tu avance. Inténtalo de nuevo.";
   } finally {
     guardandoLeccion = false;
     actualizarContador();
@@ -513,6 +535,7 @@ function retroceder() {
 async function mostrarEvaluacion(tipo = "evaluacion") {
   if (verificarCierreCurso()) return;
   if (!curso || !contenidoTema || guardandoLeccion) return;
+  detenerConsumo();
   const solicitud = ++solicitudContenido;
   cargandoLeccion = false;
   leccionActualId = tipo === "examen" ? "examen" : "evaluacion";
@@ -780,7 +803,7 @@ function actualizarEstadoSidebar() {
 }
 
 btnAnterior?.addEventListener("click", retroceder);
-btnSiguiente?.addEventListener("click", () => leccionDisponible ? avanzar() : siguienteLeccion());
+btnSiguiente?.addEventListener("click", avanzar);
 document.querySelector('.lector-buscador input')?.addEventListener('input', filtrarEsquema);
 btnVolver?.addEventListener("click", () => (window.location.href = "dashboard.html"));
 btnToggleSidebar?.addEventListener("click", () => {

@@ -196,3 +196,20 @@ GET /reportes/sesiones devuelve [{id, usuarioId, nombre, entrada, ultimaSenal, s
 solo a admin/superadmin activos; debe rechazar trabajador/instructor con 403.
 El servidor debe cerrar sesiones vencidas, revocadas y desactivadas, y guardar el historial en la base
 de datos para compartirlo entre equipos. Los pulsos deben ser idempotentes para varias pestañas.
+
+
+### Validación de consumo antes de avanzar
+El lector exige el 100 % de los tramos únicos de video reproducidos con la pestaña visible.
+Adelantar o repetir un mismo tramo no aumenta artificialmente la cobertura. Texto e imagen:
+120 segundos visibles. Documento PDF: descarga iniciada tras obtener el archivo correctamente,
+o 120 segundos de consulta en el visor. El navegador no permite confirmar que el usuario guardó
+el archivo en disco ni que prestó atención. Una descarga fallida no habilita el avance.
+Siguiente guarda la evidencia; el menú lateral no permite saltar unidades pendientes.
+Los avances ya completados se conservan. Los contadores parciales se guardan localmente y se
+separan por cuenta, contenido y fecha de apertura (incluida repetición autorizada).
+Los umbrales están en REGLAS_CONSUMO de js/api.js.
+POST /progreso/leccion/:id/completar recibe {evidencia:{segundos,tramos,duracion,descargado}}.
+En demo se valida la regla del contenido, la evaluación inicial y las unidades anteriores.
+En producción el backend debe validar también esos requisitos, usar duración de video confiable,
+y registrar eventos/tiempos y descargas en el servidor: no debe confiar en evidencia enviada por
+el cliente ni en localStorage. Esta versión es un control de avance del frontend, no prueba de atención.

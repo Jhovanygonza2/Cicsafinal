@@ -1489,6 +1489,16 @@ async function simularSolicitud(metodo, ruta, cuerpo) {
       const propio = DB.progreso[usuario.id] || (DB.progreso[usuario.id] = {});
       const progreso = propio[curso.id] || (propio[curso.id] = { porcentaje: 0, estado: "no_iniciado", completadas: [] });
       const leccionId = Number(matchCompletar[1]);
+      const lista = obtenerLeccionesCurso(curso);
+      const leccion = lista.find(l => Number(l.id) === leccionId);
+      if (!progreso.completadas.includes(leccionId)) {
+        if (!progreso.evaluacionInicialAprobada) throw new Error("Aprueba primero la evaluación inicial.");
+        if (lista.slice(0, lista.indexOf(leccion)).some(l => !progreso.completadas.includes(Number(l.id)))) throw new Error("Completa las unidades anteriores.");
+        const contenido = DB.contenidoLecciones[leccionId] || {};
+        if (!cumpleConsumoLeccion(reglaConsumoLeccion(leccion, contenido), cuerpo?.evidencia)) throw new Error("Falta ver el video, descargar el material o cumplir el tiempo mínimo de lectura.");
+        progreso.evidencias = progreso.evidencias || {};
+        progreso.evidencias[leccionId] = { ...cuerpo.evidencia, completadoEn: new Date().toISOString() };
+      }
       if (!progreso.completadas.includes(leccionId)) progreso.completadas.push(leccionId);
       const totalLecciones = obtenerLeccionesCurso(curso).length;
       const idsValidos = new Set(obtenerLeccionesCurso(curso).map((l) => String(l.id)));
@@ -1759,7 +1769,7 @@ const cursos = {
 const progreso = {
   reabrir: (cursoId, usuarioId) => solicitar("POST", "/progreso/reabrir/" + cursoId + "/" + usuarioId),
   misCursos: () => solicitar("GET", "/progreso/mis-cursos"),
-  completarLeccion: (idLeccion) => solicitar("POST", `/progreso/leccion/${idLeccion}/completar`),
+  completarLeccion: (idLeccion, evidencia) => solicitar("POST", `/progreso/leccion/${idLeccion}/completar`, { evidencia }),
 };
 
 const lecciones = {
@@ -1864,4 +1874,26 @@ function enviarPulsoUso(evento = "pulso", motivo) {
     }).then(res => { if (!res.ok) throw new Error("No se pudo registrar la sesión."); })
       .catch(error => console.warn("Registro de uso:", error.message));
   } catch (error) { console.warn("Registro de uso:", error.message); }
+}
+
+
+const REGLAS_CONSUMO = Object.freeze({video: 1, lectura: 120});
+function reglaConsumoLeccion(leccion, contenido = {}) {
+  const url = leccion.url || leccion.video || leccion.mediaUrl || contenido.url || contenido.video || "";
+  const tipo = String(leccion.tipo || contenido.tipo || "").toLowerCase();
+  if (tipo === "video" || /^data:video\//i.test(url) || /\.(mp4|webm|ogg|mov)([?#].*)?$/i.test(url)) return {tipo: "video", disponible: !!url};
+  if (url && (["documento", "pdf"].includes(tipo) || /^data:application\/pdf/i.test(url) || /\.pdf([?#].*)?$/i.test(url))) return {tipo: "documento", disponible: true};
+  return {tipo: "lectura", disponible: !!(url || leccion.informacion || contenido.cuerpo)};
+}
+function unirTramosVideo(tramos, duracion) {
+  const validos = (Array.isArray(tramos) ? tramos : []).filter(t => Array.isArray(t) && t.length === 2 && t.every(Number.isFinite) && t[0] >= 0 && t[1] > t[0] && t[1] <= duracion).map(t => [...t]).sort((a,b) => a[0]-b[0]);
+  return validos.reduce((r,t) => { const ultimo=r[r.length-1]; if(ultimo && t[0]<=ultimo[1]) ultimo[1]=Math.max(ultimo[1],t[1]); else r.push(t); return r; }, []);
+}
+function segundosVideoVistos(evidencia) {
+  return unirTramosVideo(evidencia?.tramos, evidencia?.duracion).reduce((s,t)=>s+t[1]-t[0],0);
+}
+function cumpleConsumoLeccion(regla, evidencia) {
+  if (!regla.disponible || !evidencia) return false;
+  if (regla.tipo === "video") return Number.isFinite(evidencia.duracion) && evidencia.duracion > 0 && segundosVideoVistos(evidencia) / evidencia.duracion >= REGLAS_CONSUMO.video;
+  return (regla.tipo === "documento" && evidencia.descargado === true) || (Number.isFinite(evidencia.segundos) && evidencia.segundos >= REGLAS_CONSUMO.lectura);
 }
