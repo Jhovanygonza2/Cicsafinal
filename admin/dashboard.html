@@ -173,6 +173,23 @@
         </table>
       </div>
       <div class="paginacion-admin" id="paginacion-actividad" aria-label="Paginación de actividad"></div>
+      <div id="historial-sesiones" hidden>
+        <h3>Conexiones de trabajadores</h3>
+        <p>Entrada, salida y tiempo de sesión. Este tiempo no equivale a tiempo de estudio.</p>
+        <p id="sesiones-demo" class="muted" hidden>Modo demo: registros guardados en este navegador; no se comparten entre equipos.</p>
+        <div class="barra-acciones">
+          <label>Buscar trabajador <input id="buscar-sesiones" type="search" placeholder="Nombre del trabajador"></label>
+          <button id="actualizar-sesiones" type="button" class="btn btn-secundario btn-sm">Actualizar conexiones</button>
+        </div>
+        <p id="sesiones-error" role="status" aria-live="polite"></p>
+        <div class="tabla-admin-wrap"><table>
+          <thead><tr><th>Trabajador</th><th>Conexión</th><th>Desconexión</th><th>Tiempo conectado</th><th>Estado / motivo</th></tr></thead>
+          <tbody id="tabla-sesiones"></tbody>
+        </table></div>
+        <div id="paginacion-sesiones" class="paginacion-admin" aria-label="Paginación de conexiones"></div>
+        <p class="muted">Sin señal durante más de 2 minutos: salida estimada en la última señal recibida. Cerrar una pestaña no finaliza la sesión si otra sigue abierta.</p>
+      </div>
+
     </section>
 
     <!-- ============ NOTIFICACIONES ============ -->
@@ -527,7 +544,7 @@
 <div id="admin-toast-container" class="toast-container" role="status" aria-live="polite"></div>
 
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
-<script src="../js/api.js"></script>
+<script src="../js/api.js?v=sesiones-1"></script>
 <script src="../js/tutoriales.js"></script>
 <!-- admin-dashboard.js fue dividido en módulos por funcionalidad dentro de js/admin/ para facilitar su mantenimiento. -->
 <!-- El orden de carga importa: estado-utilidades primero, dashboard-arranque siempre al final. -->
@@ -536,6 +553,7 @@
 <script src="../js/admin/notificaciones.js"></script>
 <script src="../js/admin/campana-admin.js"></script>
 <script src="../js/admin/metricas-actividad.js"></script>
+<script src="../js/admin/sesiones.js?v=1"></script>
 <script src="../js/admin/usuarios.js"></script>
 <script src="../js/admin/solicitudes.js"></script>
 <script src="../js/admin/cursos.js"></script>

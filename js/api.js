@@ -62,7 +62,8 @@ const sesion = {
   marcarActividad() {
     localStorage.setItem("cicsa_ultima_actividad", Date.now().toString());
   },
-  cerrar() {
+  cerrar(motivo = "cierre_manual") {
+    enviarPulsoUso("cerrar", motivo);
     localStorage.removeItem("cicsa_token");
     localStorage.removeItem("cicsa_usuario");
     localStorage.removeItem("cicsa_ultima_actividad");
@@ -71,21 +72,30 @@ const sesion = {
   /** RS-006: cierre por inactividad configurable (minutos) */
   vigilarInactividad(minutos = 20) {
     const limite = minutos * 60 * 1000;
+    const identidadUso = sesion.token();
+    enviarPulsoUso();
+    let registroUso = localStorage.getItem("cicsa_sesion_uso");
+    const mismaSesion = () => sesion.token() === identidadUso && localStorage.getItem("cicsa_sesion_uso") === registroUso;
     let ultimaActividadPorScroll = 0;
     const registrarActividadPorScroll = () => {
+      if (!mismaSesion()) return;
       const ahora = Date.now();
       if (ahora - ultimaActividadPorScroll < 1000) return;
       ultimaActividadPorScroll = ahora;
       sesion.marcarActividad();
     };
     setInterval(() => {
+      if (!mismaSesion()) return;
       const ultima = Number(localStorage.getItem("cicsa_ultima_actividad") || 0);
       if (sesion.activa() && Date.now() - ultima > limite) {
+        sesion.cerrar("inactividad");
         alert("Tu sesión se cerró por inactividad.");
-        sesion.cerrar();
+      } else {
+        enviarPulsoUso();
+        registroUso = localStorage.getItem("cicsa_sesion_uso");
       }
     }, 30000);
-    ["click", "keydown"].forEach((ev) => window.addEventListener(ev, sesion.marcarActividad));
+    ["click", "keydown"].forEach((ev) => window.addEventListener(ev, () => { if (mismaSesion()) sesion.marcarActividad(); }));
     window.addEventListener("scroll", registrarActividadPorScroll, { passive: true });
   },
   /** RF-003 / RS-007: protege una página según los roles permitidos */
@@ -1104,6 +1114,10 @@ async function simularSolicitud(metodo, ruta, cuerpo) {
 
   autorizarSolicitud(metodo, ruta, cuerpo);
 
+  if (ruta === "/reportes/sesiones" && metodo === "GET") return cerrarSesionesVencidas();
+  if (ruta === "/sesiones/pulso" && metodo === "POST") return registrarUsoDemo("pulso");
+  if (ruta === "/sesiones/cerrar" && metodo === "POST") return registrarUsoDemo("cerrar", cuerpo?.motivo);
+
   // ---- Auth ----
   if (ruta === "/auth/login" && metodo === "POST") {
     const u = DB.usuarios.find(
@@ -1111,6 +1125,8 @@ async function simularSolicitud(metodo, ruta, cuerpo) {
     );
     if (!u || u.password !== cuerpo.password) throw new Error("Usuario o contraseña incorrectos.");
     if (!u.activo) throw new Error("Esta cuenta está desactivada. Contacta a un administrador.");
+    registrarUsoDemo("cerrar", "cambio_cuenta");
+    if (u.rol === "trabajador") iniciarUsoDemo(u);
     u.ultimoAcceso = new Date().toISOString();
     guardarDatosPersistidos("cicsa_usuarios", DB.usuarios);
     return { token: "token-demo." + u.id, usuario: { id: u.id, nombre: u.nombre, correo: u.correo, rol: u.rol } };
@@ -1760,6 +1776,7 @@ const evaluaciones = {
 };
 
 const reportes = {
+  sesiones: () => solicitar("GET", "/reportes/sesiones"),
   seguimiento: (filtros = {}) => {
     const qs = new URLSearchParams(filtros).toString();
     return solicitar("GET", `/reportes/seguimiento?${qs}`);
@@ -1790,3 +1807,61 @@ const soporte = {
   crear: datos => solicitar("POST", "/soporte", datos),
   actualizar: (id, datos) => solicitar("PATCH", "/soporte/" + id, datos)
 };
+
+// En producción, el servidor mantiene las sesiones y su reloj.
+function cerrarSesionesVencidas() {
+  const registros = cargarDatosPersistidos("cicsa_sesiones_uso", []);
+  let cambios = false;
+  registros.forEach(r => {
+    if (!r.salida && Date.now() - Date.parse(r.ultimaSenal) > 120000) {
+      r.salida = r.ultimaSenal;
+      r.motivo = "sin_senal";
+      r.estimada = true;
+      cambios = true;
+    }
+  });
+  if (cambios) guardarDatosPersistidos("cicsa_sesiones_uso", registros);
+  return registros;
+}
+function iniciarUsoDemo(usuario) {
+  const registros = cerrarSesionesVencidas();
+  const ahora = new Date().toISOString();
+  const id = registros.reduce((max, r) => Math.max(max, r.id), 0) + 1;
+  registros.push({id, usuarioId: usuario.id, nombre: usuario.nombre, entrada: ahora,
+    ultimaSenal: ahora, salida: null, motivo: null, estimada: false});
+  guardarDatosPersistidos("cicsa_sesiones_uso", registros);
+  localStorage.setItem("cicsa_sesion_uso", String(id));
+  return id;
+}
+function registrarUsoDemo(evento, motivo) {
+  const usuario = sesion.usuario();
+  if (!usuario || usuario.rol !== "trabajador") return null;
+  const cuenta = cargarDatosPersistidos("cicsa_usuarios", []).find(u => u.id === usuario.id);
+  if (!cuenta?.activo || cuenta.rol !== "trabajador" || sesion.token() !== "token-demo." + cuenta.id) return null;
+  const registros = cerrarSesionesVencidas();
+  const registro = registros.find(r => r.id === Number(localStorage.getItem("cicsa_sesion_uso")) && r.usuarioId === usuario.id);
+  if (!registro || registro.salida) {
+    if (evento === "pulso") iniciarUsoDemo(cuenta);
+    return null;
+  }
+  const ahora = new Date().toISOString();
+  registro.ultimaSenal = ahora;
+  if (evento === "cerrar") {
+    registro.salida = ahora;
+    registro.motivo = ["inactividad", "cambio_cuenta"].includes(motivo) ? motivo : "cierre_manual";
+  }
+  guardarDatosPersistidos("cicsa_sesiones_uso", registros);
+  return registro;
+}
+function enviarPulsoUso(evento = "pulso", motivo) {
+  if (!sesion.activa() || sesion.rol() !== "trabajador") return;
+  try {
+    if (MOCK_MODE) return registrarUsoDemo(evento, motivo);
+    return fetch(API_BASE + "/sesiones/" + evento, {
+      method: "POST", keepalive: true,
+      headers: {"Content-Type": "application/json", Authorization: "Bearer " + sesion.token()},
+      body: JSON.stringify({motivo})
+    }).then(res => { if (!res.ok) throw new Error("No se pudo registrar la sesión."); })
+      .catch(error => console.warn("Registro de uso:", error.message));
+  } catch (error) { console.warn("Registro de uso:", error.message); }
+}

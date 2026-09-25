@@ -177,3 +177,22 @@ En demo se utiliza cicsa_soporte en localStorage del mismo navegador.
 El backend debe implementar estos endpoints y permisos para uso entre equipos.
 
 Pruebas de privacidad y permisos de soporte: node tests/soporte.cjs.
+
+
+### Historial de conexiones
+Admin y súper administrador: **Actividad → Conexiones de trabajadores**.
+Registra entrada, salida, duración y motivo; incluye búsqueda, paginación y actualización cada 30 segundos.
+Solo registra trabajadores. Recargar o cambiar de página conserva la sesión.
+El cierre manual y por inactividad se registra explícitamente. Tras más de 2 minutos sin pulso,
+la salida se estima en la última señal recibida; no se inventa una hora exacta de cierre del navegador.
+La duración mide sesión, no estudio. No se reconstruyen conexiones anteriores a esta función.
+En demo todo queda en localStorage del mismo navegador/origen: ocultar el reporte y validar las
+llamadas simuladas no protege frente a quien inspeccione el almacenamiento local.
+
+Backend pendiente (MOCK_MODE=false): el login debe crear una sesión por token para trabajadores;
+POST /sesiones/pulso actualiza su última señal y POST /sesiones/cerrar recibe {motivo}.
+Ambos identifican al trabajador por el token, verifican cuenta activa y usan hora del servidor.
+GET /reportes/sesiones devuelve [{id, usuarioId, nombre, entrada, ultimaSenal, salida, motivo, estimada}]
+solo a admin/superadmin activos; debe rechazar trabajador/instructor con 403.
+El servidor debe cerrar sesiones vencidas, revocadas y desactivadas, y guardar el historial en la base
+de datos para compartirlo entre equipos. Los pulsos deben ser idempotentes para varias pestañas.

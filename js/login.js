@@ -13,6 +13,7 @@ function redirigirSegunRol() {
 }
 
 function limpiarSesionLocal() {
+  enviarPulsoUso("cerrar", "cierre_manual");
   localStorage.removeItem("cicsa_token");
   localStorage.removeItem("cicsa_usuario");
   localStorage.removeItem("cicsa_ultima_actividad");
